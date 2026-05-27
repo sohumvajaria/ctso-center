@@ -1,18 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-
-const SCENARIO = {
-  title: 'Retail Store Performance',
-  body: `You are the assistant manager at a mid-size retail clothing store. The store manager has asked you to present a plan to improve the store's declining sales performance over the past quarter. Sales are down 12% year-over-year. Address what factors may be causing the decline and outline specific strategies to turn performance around.`,
-};
-
-const PI_LIST = [
-  { pi_number: 1, description: 'Explain the concept of marketing strategies' },
-  { pi_number: 2, description: 'Analyze factors affecting a business\'s profit' },
-  { pi_number: 3, description: 'Describe the role of customer service in business' },
-  { pi_number: 4, description: 'Identify strategies to improve business performance' },
-];
+import { type Scenario, getRandomScenario } from '@/lib/scenarios';
 
 interface PiScore {
   pi_number: number;
@@ -40,12 +29,14 @@ const SCORE_LABELS: Record<number, string> = {
 };
 
 export default function PracticePage() {
+  const [scenario, setScenario] = useState<Scenario>(() => getRandomScenario());
   const [response, setResponse] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<JudgeResult | null>(null);
   const [history, setHistory] = useState<ConversationTurn[]>([]);
   const [round, setRound] = useState(1);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -59,8 +50,8 @@ export default function PracticePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          scenario: SCENARIO.body,
-          pi_list: PI_LIST,
+          scenario: scenario.body,
+          pi_list: scenario.pi_list,
           student_response: response,
           conversation_history: history,
         }),
@@ -77,11 +68,23 @@ export default function PracticePage() {
       setHistory((prev) => [
         ...prev,
         { role: 'user', content: response },
-        {
-          role: 'assistant',
-          content: JSON.stringify(data),
-        },
+        { role: 'assistant', content: JSON.stringify(data) },
       ]);
+
+      const saveRes = await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scenario_id: scenario.id,
+          session_id: sessionId,
+          round,
+          pi_scores: data.pi_scores,
+        }),
+      });
+      if (saveRes.ok) {
+        const saveData = await saveRes.json();
+        setSessionId(saveData.session_id);
+      }
 
       setRound((r) => r + 1);
       setResponse('');
@@ -92,30 +95,49 @@ export default function PracticePage() {
     }
   }
 
+  function handleNewScenario() {
+    setScenario(getRandomScenario(scenario.id));
+    setResult(null);
+    setHistory([]);
+    setResponse('');
+    setError('');
+    setRound(1);
+    setSessionId(null);
+  }
+
   function handleReset() {
     setResult(null);
     setHistory([]);
     setResponse('');
     setError('');
     setRound(1);
+    setSessionId(null);
   }
 
   return (
     <div className="max-w-2xl mx-auto p-6 space-y-6">
-      <h1 className="text-xl font-bold">DECA Practice — Principles of Business Management</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold">DECA Practice — Principles of Business Management</h1>
+        <button
+          onClick={handleNewScenario}
+          className="px-3 py-1.5 text-xs border border-gray-300 rounded hover:bg-gray-50"
+        >
+          New Scenario
+        </button>
+      </div>
 
       {/* Scenario card */}
       <div className="border border-gray-300 rounded p-4 bg-gray-50">
         <p className="text-xs font-semibold uppercase text-gray-500 mb-1">Scenario</p>
-        <p className="font-medium mb-2">{SCENARIO.title}</p>
-        <p className="text-sm text-gray-700 leading-relaxed">{SCENARIO.body}</p>
+        <p className="font-medium mb-2">{scenario.title}</p>
+        <p className="text-sm text-gray-700 leading-relaxed">{scenario.body}</p>
       </div>
 
       {/* PI list */}
       <div className="border border-gray-200 rounded p-4">
         <p className="text-xs font-semibold uppercase text-gray-500 mb-2">Performance Indicators</p>
         <ol className="list-decimal list-inside space-y-1">
-          {PI_LIST.map((pi) => (
+          {scenario.pi_list.map((pi) => (
             <li key={pi.pi_number} className="text-sm text-gray-700">
               {pi.description}
             </li>
