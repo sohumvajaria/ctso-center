@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { type Scenario, getRandomScenario } from '@/lib/scenarios';
+import { useState, useEffect } from 'react';
+import { type Scenario, SCENARIOS, getRandomScenario } from '@/lib/scenarios';
 
 interface PiScore {
   pi_number: number;
@@ -29,7 +29,11 @@ const SCORE_LABELS: Record<number, string> = {
 };
 
 export default function PracticePage() {
-  const [scenario, setScenario] = useState<Scenario>(() => getRandomScenario());
+  const [scenario, setScenario] = useState<Scenario>(SCENARIOS[0]);
+
+  useEffect(() => {
+    setScenario(getRandomScenario());
+  }, []);
   const [response, setResponse] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
