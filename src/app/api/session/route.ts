@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { SCENARIOS } from '@/lib/scenarios';
 
 interface PiScoreInput {
   pi_number: number;
@@ -62,4 +63,33 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   return Response.json({ session_id: resolvedSessionId });
+}
+
+export async function GET(): Promise<Response> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('id, scenario_id, created_at, pi_scores(score)')
+    .order('created_at', { ascending: false })
+    .limit(5);
+
+  if (error) {
+    console.error('[session] fetch history failed:', error);
+    return Response.json({ error: 'Failed to fetch history' }, { status: 502 });
+  }
+
+  const sessions = (data ?? []).map((s) => {
+    const scores = (s.pi_scores as { score: number }[]) ?? [];
+    const avg = scores.length
+      ? Math.round((scores.reduce((sum, p) => sum + p.score, 0) / scores.length) * 10) / 10
+      : null;
+    const scenario = SCENARIOS.find((sc) => sc.id === s.scenario_id);
+    return {
+      id: s.id,
+      scenario_title: scenario?.title ?? s.scenario_id,
+      created_at: s.created_at,
+      avg_score: avg,
+    };
+  });
+
+  return Response.json({ sessions });
 }
