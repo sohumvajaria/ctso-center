@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { type Scenario, SCENARIOS, getRandomScenario } from '@/lib/scenarios';
+import { EXEMPLARS } from '@/lib/exemplars';
 
 interface PiScore {
   pi_number: number;
@@ -28,6 +29,12 @@ interface SessionHistoryItem {
   avg_score: number | null;
 }
 
+interface WeaknessData {
+  pi_description: string;
+  avg_score: number;
+  recommended_scenarios: { id: string; title: string; category: string }[];
+}
+
 const SCORE_LABELS: Record<number, string> = {
   1: 'Does not address',
   2: 'Below expectations',
@@ -46,7 +53,31 @@ function formatTime(s: number) {
 function timerColors(secondsLeft: number, done: boolean) {
   if (done || secondsLeft <= 60) return { text: 'text-red-400', ring: '#f87171' };
   if (secondsLeft <= 120) return { text: 'text-amber-400', ring: '#fbbf24' };
-  return { text: 'text-white', ring: 'rgba(255,255,255,0.85)' };
+  return { text: 'text-indigo-300', ring: '#a5b4fc' };
+}
+
+function scoreBadgeClass(score: number): string {
+  if (score >= 4) return 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/25';
+  if (score === 3) return 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/25';
+  return 'bg-red-500/10 text-red-400 ring-1 ring-red-500/25';
+}
+
+function scoreBarClass(score: number): string {
+  if (score >= 4) return 'bg-emerald-500';
+  if (score === 3) return 'bg-amber-500';
+  return 'bg-red-500';
+}
+
+function scoreTextClass(score: number): string {
+  if (score >= 4) return 'text-emerald-400';
+  if (score === 3) return 'text-amber-400';
+  return 'text-red-400';
+}
+
+function scoreGlow(score: number): string {
+  if (score >= 4) return '0 0 12px rgba(52,211,153,0.35)';
+  if (score === 3) return '0 0 12px rgba(251,191,36,0.35)';
+  return '0 0 12px rgba(248,113,113,0.35)';
 }
 
 interface TimerProps {
@@ -58,8 +89,8 @@ interface TimerProps {
 }
 
 function CompetitionTimer({ label, secondsLeft, total, started, done }: TimerProps) {
-  const SIZE = 84;
-  const STROKE = 2.5;
+  const SIZE = 88;
+  const STROKE = 2;
   const R = (SIZE - STROKE * 2) / 2;
   const C = 2 * Math.PI * R;
   const dashOffset = done ? C : C * (1 - secondsLeft / total);
@@ -67,18 +98,11 @@ function CompetitionTimer({ label, secondsLeft, total, started, done }: TimerPro
   const dim = !started && !done;
 
   return (
-    <div className={`flex flex-col items-center gap-2 transition-opacity duration-500 ${dim ? 'opacity-20' : 'opacity-100'}`}>
-      <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-white/40">{label}</p>
+    <div className={`flex flex-col items-center gap-2 transition-all duration-700 ${dim ? 'opacity-20' : 'opacity-100'}`}>
+      <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/35">{label}</p>
       <div className="relative">
         <svg width={SIZE} height={SIZE} style={{ transform: 'rotate(-90deg)' }}>
-          {/* Track */}
-          <circle
-            cx={SIZE / 2} cy={SIZE / 2} r={R}
-            fill="none"
-            stroke="rgba(255,255,255,0.06)"
-            strokeWidth={STROKE}
-          />
-          {/* Progress arc */}
+          <circle cx={SIZE / 2} cy={SIZE / 2} r={R} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={STROKE} />
           <circle
             cx={SIZE / 2} cy={SIZE / 2} r={R}
             fill="none"
@@ -87,7 +111,7 @@ function CompetitionTimer({ label, secondsLeft, total, started, done }: TimerPro
             strokeLinecap="round"
             strokeDasharray={C}
             strokeDashoffset={dashOffset}
-            style={{ transition: 'stroke-dashoffset 0.9s linear, stroke 0.4s ease' }}
+            style={{ transition: 'stroke-dashoffset 0.9s linear, stroke 0.4s ease', filter: `drop-shadow(0 0 4px ${ring}60)` }}
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
@@ -106,23 +130,18 @@ function CompetitionTimer({ label, secondsLeft, total, started, done }: TimerPro
   );
 }
 
-function scoreBadgeClass(score: number): string {
-  if (score >= 4) return 'bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30';
-  if (score === 3) return 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/30';
-  return 'bg-red-500/15 text-red-400 ring-1 ring-red-500/30';
-}
-
-function scoreBarClass(score: number): string {
-  if (score >= 4) return 'bg-emerald-500';
-  if (score === 3) return 'bg-amber-500';
-  return 'bg-red-500';
-}
-
 export default function PracticePage() {
   const [scenario, setScenario] = useState<Scenario>(SCENARIOS[0]);
 
   useEffect(() => {
-    setScenario(getRandomScenario());
+    const params = new URLSearchParams(window.location.search);
+    const scenarioId = params.get('scenario');
+    if (scenarioId) {
+      const found = SCENARIOS.find((s) => s.id === scenarioId);
+      setScenario(found ?? getRandomScenario());
+    } else {
+      setScenario(getRandomScenario());
+    }
   }, []);
 
   const [response, setResponse] = useState('');
@@ -133,6 +152,7 @@ export default function PracticePage() {
   const [round, setRound] = useState(1);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
+  const [weakness, setWeakness] = useState<WeaknessData | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
 
   async function fetchHistory() {
@@ -140,13 +160,12 @@ export default function PracticePage() {
     if (res.ok) {
       const data = await res.json();
       setSessionHistory(data.sessions ?? []);
+      setWeakness(data.weakness ?? null);
     }
     setHistoryLoading(false);
   }
 
-  useEffect(() => {
-    fetchHistory();
-  }, []);
+  useEffect(() => { fetchHistory(); }, []);
 
   // Timers
   const [prepLeft, setPrepLeft] = useState(PREP_DURATION);
@@ -157,21 +176,14 @@ export default function PracticePage() {
   const prepRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const presentRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Prep timer: starts immediately on mount
   useEffect(() => {
     prepRef.current = setInterval(() => {
       setPrepLeft((t) => {
-        if (t <= 1) {
-          clearInterval(prepRef.current!);
-          setPrepDone(true);
-          return 0;
-        }
+        if (t <= 1) { clearInterval(prepRef.current!); setPrepDone(true); return 0; }
         return t - 1;
       });
     }, 1000);
-    return () => {
-      if (prepRef.current) clearInterval(prepRef.current);
-    };
+    return () => { if (prepRef.current) clearInterval(prepRef.current); };
   }, []);
 
   function startPresentationTimer() {
@@ -179,11 +191,7 @@ export default function PracticePage() {
     setPresentStarted(true);
     presentRef.current = setInterval(() => {
       setPresentLeft((t) => {
-        if (t <= 1) {
-          clearInterval(presentRef.current!);
-          setPresentDone(true);
-          return 0;
-        }
+        if (t <= 1) { clearInterval(presentRef.current!); setPresentDone(true); return 0; }
         return t - 1;
       });
     }, 1000);
@@ -192,7 +200,6 @@ export default function PracticePage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!response.trim()) return;
-
     setLoading(true);
     setError('');
 
@@ -215,7 +222,6 @@ export default function PracticePage() {
 
       const data: JudgeResult = await res.json();
       setResult(data);
-
       setHistory((prev) => [
         ...prev,
         { role: 'user', content: response },
@@ -250,21 +256,13 @@ export default function PracticePage() {
 
   function handleNewScenario() {
     setScenario(getRandomScenario(scenario.id));
-    setResult(null);
-    setHistory([]);
-    setResponse('');
-    setError('');
-    setRound(1);
-    setSessionId(null);
+    setResult(null); setHistory([]); setResponse('');
+    setError(''); setRound(1); setSessionId(null);
   }
 
   function handleReset() {
-    setResult(null);
-    setHistory([]);
-    setResponse('');
-    setError('');
-    setRound(1);
-    setSessionId(null);
+    setResult(null); setHistory([]); setResponse('');
+    setError(''); setRound(1); setSessionId(null);
   }
 
   const avgScore = result
@@ -272,239 +270,390 @@ export default function PracticePage() {
     : null;
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      {/* Sticky header with nav + timers */}
-      <header className="sticky top-0 z-10 bg-black/95 backdrop-blur-sm border-b border-white/10">
-        <div className="max-w-2xl mx-auto px-6">
-          {/* Nav row */}
-          <div className="flex items-center justify-between py-3 border-b border-white/[0.06]">
-            <Link
-              href="/"
-              className="text-sm font-semibold tracking-tight text-white/50 hover:text-white transition-colors"
-            >
-              CTSO Center
-            </Link>
-            <div className="flex items-center gap-3">
-              {round > 1 && (
-                <span className="text-xs text-white/30">Round {round - 1} complete</span>
-              )}
-              <button
-                onClick={handleNewScenario}
-                className="px-3 py-1.5 text-xs font-medium border border-white/15 rounded-md text-white/50 hover:text-white hover:border-white/30 transition-colors"
-              >
-                New Scenario
-              </button>
+    <div
+      className="min-h-screen text-white"
+      style={{ background: 'radial-gradient(ellipse 80% 35% at 50% 0%, rgba(99,102,241,0.13) 0%, transparent 65%), #09090b' }}
+    >
+      {/* ── Sticky header ───────────────────────────────────────── */}
+      <header className="sticky top-0 z-20 backdrop-blur-xl" style={{ background: 'rgba(9,9,11,0.88)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        {/* Nav row */}
+        <div className="max-w-3xl mx-auto px-6 h-14 flex items-center justify-between">
+          {/* Logo */}
+          <Link href="/" className="flex items-center gap-2.5 group">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors" style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.22)' }}>
+              <svg viewBox="0 0 14 14" width="12" height="12" fill="none">
+                <polygon points="7,1 13,4 13,10 7,13 1,10 1,4" fill="rgba(165,180,252,0.9)" />
+              </svg>
             </div>
-          </div>
+            <span className="text-sm font-semibold text-white/90">CTSO Center</span>
+          </Link>
 
-          {/* Timer row */}
-          <div className="flex items-center justify-center gap-16 py-4">
-            <CompetitionTimer
-              label="Prep Time"
-              secondsLeft={prepLeft}
-              total={PREP_DURATION}
-              started={true}
-              done={prepDone}
-            />
-            <div className="h-14 w-px bg-white/[0.08]" />
-            <CompetitionTimer
-              label="Presentation"
-              secondsLeft={presentLeft}
-              total={PRESENT_DURATION}
-              started={presentStarted}
-              done={presentDone}
-            />
+          {/* Nav + actions */}
+          <div className="flex items-center gap-3">
+            <nav className="flex items-center gap-1">
+              <Link
+                href="/scenarios"
+                className="text-xs font-medium px-3 py-1.5 rounded-lg text-white/40 hover:text-white transition-colors"
+              >
+                Scenarios
+              </Link>
+              <span className="text-xs font-medium px-3 py-1.5 rounded-lg text-indigo-400" style={{ background: 'rgba(99,102,241,0.1)' }}>
+                Practice
+              </span>
+            </nav>
+            <div className="w-px h-4 bg-white/[0.08]" />
+            {round > 1 && (
+              <span className="text-xs text-white/25 tabular-nums">Round {round - 1}</span>
+            )}
+            <button
+              onClick={handleNewScenario}
+              className="text-xs font-medium px-3 py-1.5 rounded-lg text-white/45 transition-all hover:text-white"
+              style={{ border: '1px solid rgba(255,255,255,0.08)' }}
+            >
+              New Scenario
+            </button>
           </div>
+        </div>
+
+        {/* Timer row */}
+        <div className="flex items-center justify-center gap-20 py-5" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+          <CompetitionTimer label="Prep Time" secondsLeft={prepLeft} total={PREP_DURATION} started={true} done={prepDone} />
+          <div className="h-16 w-px" style={{ background: 'linear-gradient(to bottom, transparent, rgba(255,255,255,0.08), transparent)' }} />
+          <CompetitionTimer label="Presentation" secondsLeft={presentLeft} total={PRESENT_DURATION} started={presentStarted} done={presentDone} />
         </div>
       </header>
 
-      {/* Prep time up banner */}
+      {/* ── Alert banners ───────────────────────────────────────── */}
       {prepDone && !presentStarted && (
-        <div className="border-b border-amber-500/20 bg-amber-500/[0.07] px-6 py-3">
-          <p className="text-center text-sm font-medium text-amber-300 tracking-wide">
+        <div className="px-6 py-3.5 text-center" style={{ background: 'rgba(245,158,11,0.08)', borderBottom: '1px solid rgba(245,158,11,0.18)' }}>
+          <p className="text-sm font-medium text-amber-300/90 tracking-wide">
             Prep time is up — begin your presentation.
           </p>
         </div>
       )}
-
-      {/* Presentation time up banner */}
       {presentDone && (
-        <div className="border-b border-red-500/20 bg-red-500/[0.07] px-6 py-3">
-          <p className="text-center text-sm font-medium text-red-300 tracking-wide">
+        <div className="px-6 py-3.5 text-center" style={{ background: 'rgba(239,68,68,0.07)', borderBottom: '1px solid rgba(239,68,68,0.18)' }}>
+          <p className="text-sm font-medium text-red-300/90 tracking-wide">
             Presentation time is up.
           </p>
         </div>
       )}
 
-      <main className="max-w-2xl mx-auto px-6 py-10 space-y-6">
+      {/* ── Main content ────────────────────────────────────────── */}
+      <main className="max-w-3xl mx-auto px-6 py-10 space-y-4">
+
         {/* Scenario card */}
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-6">
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-white/30 mb-3">
-            Scenario — Principles of Business Management
-          </p>
-          <h2 className="text-lg font-semibold text-white mb-3">{scenario.title}</h2>
-          <p className="text-sm text-white/60 leading-relaxed">{scenario.body}</p>
+        <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+          <div className="px-6 py-4 flex items-center gap-3" style={{ background: 'linear-gradient(to right, rgba(99,102,241,0.07), transparent)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md" style={{ color: 'rgba(165,180,252,0.8)', background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.2)' }}>
+              DECA
+            </span>
+            <span className="text-[10px] text-white/25">·</span>
+            <span className="text-[10px] font-medium uppercase tracking-wider text-white/30">
+              Principles of Business Management
+            </span>
+          </div>
+          <div className="px-6 py-6" style={{ background: 'rgba(255,255,255,0.015)' }}>
+            <h2 className="text-xl font-semibold text-white mb-3 leading-snug">{scenario.title}</h2>
+            <p className="text-sm text-white/55 leading-7">{scenario.body}</p>
+          </div>
         </div>
 
         {/* PI list */}
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-6">
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-white/30 mb-4">
+        <div className="rounded-2xl px-6 py-6" style={{ border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.018)' }}>
+          <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-white/25 mb-5">
             Performance Indicators
           </p>
-          <ol className="space-y-2.5">
+          <div className="space-y-3.5">
             {scenario.pi_list.map((pi) => (
-              <li key={pi.pi_number} className="flex gap-3 text-sm">
-                <span className="shrink-0 w-5 h-5 rounded-full bg-white/10 text-white/40 text-[11px] font-bold flex items-center justify-center mt-0.5">
+              <div key={pi.pi_number} className="flex items-start gap-4">
+                <div className="shrink-0 w-6 h-6 rounded-md text-[11px] font-bold text-white/35 flex items-center justify-center mt-0.5" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
                   {pi.pi_number}
-                </span>
-                <span className="text-white/60">{pi.description}</span>
-              </li>
+                </div>
+                <p className="text-sm text-white/60 leading-6">{pi.description}</p>
+              </div>
             ))}
-          </ol>
+          </div>
         </div>
 
         {/* Judge follow-up */}
         {result?.follow_up_question && (
-          <div className="rounded-xl border border-blue-500/25 bg-blue-500/[0.06] p-5">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-blue-400/60 mb-2">
-              Judge Follow-up · Round {round - 1}
-            </p>
-            <p className="text-sm text-white/75 leading-relaxed">{result.follow_up_question}</p>
+          <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(99,102,241,0.2)', background: 'rgba(99,102,241,0.05)' }}>
+            <div className="px-6 py-4">
+              <div className="flex items-center gap-2.5 mb-3">
+                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0" style={{ background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.28)' }}>
+                  <svg viewBox="0 0 10 10" width="9" height="9" fill="none">
+                    <circle cx="5" cy="3.5" r="1.5" fill="rgba(165,180,252,0.8)" />
+                    <path d="M2 8c0-1.657 1.343-3 3-3s3 1.343 3 3" stroke="rgba(165,180,252,0.8)" strokeWidth="1" strokeLinecap="round" fill="none" />
+                  </svg>
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400/60">
+                  Judge's Follow-up · Round {round - 1}
+                </span>
+              </div>
+              <p className="text-sm text-white/80 leading-7">{result.follow_up_question}</p>
+            </div>
           </div>
         )}
 
         {/* Response form */}
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-6 space-y-4">
-          <label className="block text-sm font-medium text-white/60">
-            {round === 1 ? 'Your response' : `Follow-up response · Round ${round}`}
-          </label>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <textarea
-              value={response}
-              onChange={(e) => setResponse(e.target.value)}
-              rows={6}
-              className="w-full bg-black border border-white/10 rounded-lg px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:ring-1 focus:ring-white/25 focus:border-white/25 transition-colors resize-none disabled:opacity-40"
-              placeholder="Type your response here…"
-              disabled={loading}
-            />
-            <div className="flex gap-3">
-              <button
-                type="submit"
-                disabled={loading || !response.trim()}
-                className="px-5 py-2 bg-white text-black text-sm font-medium rounded-lg disabled:opacity-30 hover:bg-gray-100 transition-colors"
-              >
-                {loading ? 'Evaluating…' : 'Submit Response'}
-              </button>
-              {history.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="px-4 py-2 border border-white/15 text-sm text-white/50 rounded-lg hover:text-white hover:border-white/30 transition-colors"
-                >
-                  Start over
-                </button>
-              )}
-            </div>
-          </form>
+        <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+          <div className="px-6 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'rgba(255,255,255,0.02)' }}>
+            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-white/25">
+              {round === 1 ? 'Your Response' : `Follow-up Response · Round ${round}`}
+            </p>
+          </div>
+          <div className="p-5" style={{ background: 'rgba(255,255,255,0.015)' }}>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <textarea
+                value={response}
+                onChange={(e) => setResponse(e.target.value)}
+                rows={6}
+                className="w-full bg-transparent px-1 py-1 text-sm text-white/90 placeholder-white/18 focus:outline-none resize-none leading-7"
+                style={{ caretColor: 'rgba(165,180,252,0.9)' }}
+                placeholder="Type your response here…"
+                disabled={loading}
+              />
+              <div className="flex items-center justify-between pt-1" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                <div className="flex gap-2.5">
+                  <button
+                    type="submit"
+                    disabled={loading || !response.trim()}
+                    className="px-5 py-2 text-sm font-semibold rounded-xl text-white transition-all disabled:opacity-30"
+                    style={{ background: loading || !response.trim() ? 'rgba(99,102,241,0.4)' : 'rgba(99,102,241,1)', boxShadow: !loading && response.trim() ? '0 0 20px rgba(99,102,241,0.35)' : 'none' }}
+                  >
+                    {loading ? 'Evaluating…' : 'Submit Response'}
+                  </button>
+                  {history.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleReset}
+                      className="px-4 py-2 text-sm text-white/35 rounded-xl transition-all hover:text-white/70"
+                      style={{ border: '1px solid rgba(255,255,255,0.07)' }}
+                    >
+                      Start over
+                    </button>
+                  )}
+                </div>
+                {response.trim() && (
+                  <span className="text-[11px] text-white/20 tabular-nums">
+                    {response.trim().split(/\s+/).length} words
+                  </span>
+                )}
+              </div>
+            </form>
+          </div>
         </div>
 
+        {/* Error */}
         {error && (
-          <div className="rounded-xl border border-red-500/25 bg-red-500/[0.06] px-4 py-3">
+          <div className="rounded-2xl px-5 py-4" style={{ border: '1px solid rgba(239,68,68,0.2)', background: 'rgba(239,68,68,0.06)' }}>
             <p className="text-sm text-red-400">{error}</p>
           </div>
         )}
 
-        {/* Evaluation results */}
+        {/* ── Evaluation results ──────────────────────────────────── */}
         {result && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-white/70">
-                Evaluation · Round {round - 1}
-              </h3>
-              {avgScore !== null && (
-                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${scoreBadgeClass(avgScore)}`}>
-                  Avg {avgScore} / 5
-                </span>
-              )}
+          <div className="space-y-3 pt-2">
+            {/* Summary card */}
+            <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+              <div className="px-6 py-4 flex items-center justify-between" style={{ background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-semibold text-white/80">Judge's Evaluation</span>
+                  <span className="text-xs text-white/25">Round {round - 1}</span>
+                </div>
+                {avgScore !== null && (
+                  <div className="flex items-baseline gap-1">
+                    <span className={`text-3xl font-bold tabular-nums leading-none ${scoreTextClass(avgScore)}`}>
+                      {avgScore}
+                    </span>
+                    <span className="text-sm text-white/25 font-medium">/5</span>
+                  </div>
+                )}
+              </div>
+              <div className="px-6 py-5" style={{ background: 'rgba(255,255,255,0.012)' }}>
+                <p className="text-sm text-white/55 leading-7">{result.overall_feedback}</p>
+              </div>
             </div>
 
-            <div className="space-y-3">
-              {result.pi_scores.map((pi) => (
-                <div key={pi.pi_number} className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-                  <div className="flex items-start justify-between gap-3 mb-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/40 text-[11px] font-bold flex items-center justify-center">
-                        {pi.pi_number}
-                      </span>
-                      <span className="text-xs text-white/45 truncate">
-                        {scenario.pi_list.find((p) => p.pi_number === pi.pi_number)?.description}
+            {/* PI score cards */}
+            <div className="grid gap-3">
+              {result.pi_scores.map((pi) => {
+                const piDesc = scenario.pi_list.find((p) => p.pi_number === pi.pi_number)?.description;
+                const exemplar = piDesc ? EXEMPLARS[piDesc] : undefined;
+                return (
+                  <div key={pi.pi_number} className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.018)' }}>
+                    {/* Card header */}
+                    <div className="flex items-start justify-between gap-4 px-5 pt-5 pb-4">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="shrink-0 w-6 h-6 rounded-md text-[11px] font-bold text-white/35 flex items-center justify-center mt-0.5" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                          {pi.pi_number}
+                        </div>
+                        <p className="text-sm font-medium text-white/70 leading-6 pt-0.5">{piDesc}</p>
+                      </div>
+                      <div className="shrink-0 flex items-baseline gap-0.5 pl-2">
+                        <span
+                          className={`text-4xl font-bold tabular-nums leading-none ${scoreTextClass(pi.score)}`}
+                          style={{ textShadow: scoreGlow(pi.score) }}
+                        >
+                          {pi.score}
+                        </span>
+                        <span className="text-base text-white/20 font-medium ml-0.5">/5</span>
+                      </div>
+                    </div>
+
+                    {/* Progress bar */}
+                    <div className="px-5 pb-3">
+                      <div className="w-full rounded-full h-[3px]" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                        <div
+                          className={`h-[3px] rounded-full transition-all duration-700 ${scoreBarClass(pi.score)}`}
+                          style={{
+                            width: `${(pi.score / 5) * 100}%`,
+                            boxShadow: scoreGlow(pi.score),
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Feedback row */}
+                    <div className="flex items-start justify-between gap-4 px-5 pb-4 pt-2">
+                      <p className="text-xs text-white/40 leading-6">{pi.feedback}</p>
+                      <span className={`shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-lg whitespace-nowrap ${scoreBadgeClass(pi.score)}`}>
+                        {SCORE_LABELS[pi.score]}
                       </span>
                     </div>
-                    <span className={`shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full ${scoreBadgeClass(pi.score)}`}>
-                      {pi.score}/5 · {SCORE_LABELS[pi.score]}
-                    </span>
-                  </div>
-                  <div className="w-full bg-white/[0.06] rounded-full h-1 mb-3">
-                    <div
-                      className={`h-1 rounded-full transition-all duration-700 ${scoreBarClass(pi.score)}`}
-                      style={{ width: `${(pi.score / 5) * 100}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-white/45 leading-relaxed">{pi.feedback}</p>
-                </div>
-              ))}
-            </div>
 
-            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-white/30 mb-2">
-                Overall Feedback
-              </p>
-              <p className="text-sm text-white/65 leading-relaxed">{result.overall_feedback}</p>
+                    {/* Exemplar */}
+                    {exemplar && (
+                      <div className="mx-5 mb-5 rounded-xl px-4 py-3.5" style={{ background: 'rgba(99,102,241,0.05)', borderLeft: '2px solid rgba(99,102,241,0.35)' }}>
+                        <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-indigo-400/50 mb-2">
+                          Strong Response Example
+                        </p>
+                        <p className="text-xs text-white/45 leading-[1.75]">{exemplar}</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
       </main>
 
-      {/* Performance history */}
-      <section className="max-w-2xl mx-auto px-6 pb-16">
-        <div className="border-t border-white/[0.06] pt-10">
-          <h3 className="text-[11px] font-semibold uppercase tracking-widest text-white/30 mb-5">
+      {/* ── Practice history ────────────────────────────────────── */}
+      <section className="max-w-3xl mx-auto px-6 pb-20 pt-6">
+        <div className="pt-10" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+          <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-white/22 mb-6">
             Practice History
-          </h3>
+          </p>
+
+          {/* Weakness tracker */}
+          {!historyLoading && weakness && (
+            <div
+              className="rounded-2xl overflow-hidden mb-6"
+              style={{ border: '1px solid rgba(251,191,36,0.2)', background: 'rgba(251,191,36,0.04)' }}
+            >
+              <div
+                className="flex items-center justify-between px-5 py-4"
+                style={{ borderBottom: '1px solid rgba(251,191,36,0.1)' }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                    <path d="M8 2L9.8 6H14L10.6 8.6L11.8 13L8 10.4L4.2 13L5.4 8.6L2 6H6.2L8 2Z" fill="rgba(251,191,36,0.7)" />
+                  </svg>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-400/70">
+                    Focus Area
+                  </span>
+                </div>
+                <span className="text-xs font-semibold text-amber-400/60 tabular-nums">
+                  avg {weakness.avg_score}/5
+                </span>
+              </div>
+
+              <div className="px-5 py-4">
+                <p className="text-sm text-white/70 leading-6 mb-1">
+                  You consistently score lowest on:
+                </p>
+                <p className="text-sm font-semibold text-white/90 mb-4">
+                  &ldquo;{weakness.pi_description}&rdquo;
+                </p>
+
+                {weakness.recommended_scenarios.length > 0 && (
+                  <>
+                    <p className="text-[11px] text-white/35 mb-3">
+                      {weakness.recommended_scenarios.length === 1
+                        ? 'Try this scenario to strengthen this skill:'
+                        : 'Here are two scenarios to strengthen this skill:'}
+                    </p>
+                    <div className="space-y-2">
+                      {weakness.recommended_scenarios.map((s) => (
+                        <Link
+                          key={s.id}
+                          href={`/practice?scenario=${s.id}`}
+                          className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl group transition-colors"
+                          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+                        >
+                          <span className="text-xs font-medium text-white/65 group-hover:text-white transition-colors truncate">
+                            {s.title}
+                          </span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-[10px] text-white/25">{s.category}</span>
+                            <svg
+                              className="w-3 h-3 text-white/25 group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all"
+                              viewBox="0 0 12 12" fill="none"
+                            >
+                              <path d="M2 6h8M7 3l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
 
           {historyLoading ? (
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               {[...Array(3)].map((_, i) => (
-                <div key={i} className="h-14 rounded-xl bg-white/[0.03] animate-pulse" />
+                <div key={i} className="h-[60px] rounded-2xl animate-pulse" style={{ background: 'rgba(255,255,255,0.03)' }} />
               ))}
             </div>
           ) : sessionHistory.length === 0 ? (
-            <p className="text-sm text-white/30 text-center py-8">
-              No practice sessions yet. Complete a round to see your history.
-            </p>
+            <div className="py-12 text-center">
+              <p className="text-sm text-white/25">
+                No practice sessions yet. Complete a round to see your history.
+              </p>
+            </div>
           ) : (
             <div className="space-y-2">
-              {sessionHistory.map((s) => (
+              {sessionHistory.map((s, i) => (
                 <div
                   key={s.id}
-                  className="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3.5"
+                  className="flex items-center justify-between gap-4 px-5 py-4 rounded-2xl transition-colors"
+                  style={{ border: '1px solid rgba(255,255,255,0.06)', background: i === 0 ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.015)' }}
                 >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-white/80 truncate">{s.scenario_title}</p>
-                    <p className="text-xs text-white/30 mt-0.5">
-                      {new Date(s.created_at).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                      })}
-                    </p>
+                  <div className="flex items-center gap-4 min-w-0">
+                    {i === 0 && (
+                      <span className="shrink-0 text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md" style={{ color: 'rgba(165,180,252,0.7)', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.18)' }}>
+                        Latest
+                      </span>
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white/75 truncate">{s.scenario_title}</p>
+                      <p className="text-xs text-white/25 mt-0.5">
+                        {new Date(s.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </p>
+                    </div>
                   </div>
                   {s.avg_score !== null ? (
-                    <span className={`shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full ${scoreBadgeClass(s.avg_score)}`}>
-                      {s.avg_score} / 5
-                    </span>
+                    <div className="shrink-0 flex items-baseline gap-0.5">
+                      <span className={`text-xl font-bold tabular-nums ${scoreTextClass(s.avg_score)}`}>{s.avg_score}</span>
+                      <span className="text-xs text-white/20">/5</span>
+                    </div>
                   ) : (
-                    <span className="shrink-0 text-xs text-white/25">—</span>
+                    <span className="text-sm text-white/20">—</span>
                   )}
                 </div>
               ))}

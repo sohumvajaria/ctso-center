@@ -66,6 +66,7 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 export async function GET(): Promise<Response> {
+  // ── Last 5 sessions for the history display ──────────────────
   const { data, error } = await supabase
     .from('sessions')
     .select('id, scenario_id, created_at, pi_scores(score)')
@@ -91,5 +92,67 @@ export async function GET(): Promise<Response> {
     };
   });
 
-  return Response.json({ sessions });
+  // ── Weakness analysis (requires ≥ 3 sessions) ────────────────
+  const { data: allSessions } = await supabase
+    .from('sessions')
+    .select('id, scenario_id');
+
+  const sessionCount = allSessions?.length ?? 0;
+
+  let weakness = null;
+
+  if (sessionCount >= 3) {
+    const { data: allScores } = await supabase
+      .from('pi_scores')
+      .select('session_id, pi_number, score');
+
+    if (allSessions && allScores) {
+      // Build session_id → scenario_id lookup
+      const sessionScenarioMap = new Map(allSessions.map((s) => [s.id, s.scenario_id]));
+
+      // Aggregate scores by PI description text
+      const piAgg: Record<string, { total: number; count: number }> = {};
+
+      for (const row of allScores) {
+        const scenarioId = sessionScenarioMap.get(row.session_id);
+        if (!scenarioId) continue;
+        const scenario = SCENARIOS.find((s) => s.id === scenarioId);
+        if (!scenario) continue;
+        const pi = scenario.pi_list.find((p) => p.pi_number === row.pi_number);
+        if (!pi) continue;
+
+        if (!piAgg[pi.description]) piAgg[pi.description] = { total: 0, count: 0 };
+        piAgg[pi.description].total += row.score;
+        piAgg[pi.description].count += 1;
+      }
+
+      // Find the PI description with the lowest average (min 2 data points)
+      let weakestDesc = '';
+      let lowestAvg = Infinity;
+
+      for (const [desc, agg] of Object.entries(piAgg)) {
+        if (agg.count < 2) continue;
+        const avg = agg.total / agg.count;
+        if (avg < lowestAvg) {
+          lowestAvg = avg;
+          weakestDesc = desc;
+        }
+      }
+
+      if (weakestDesc) {
+        const recommended = SCENARIOS
+          .filter((s) => s.pi_list.some((p) => p.description === weakestDesc))
+          .slice(0, 2)
+          .map((s) => ({ id: s.id, title: s.title, category: s.category }));
+
+        weakness = {
+          pi_description: weakestDesc,
+          avg_score: Math.round(lowestAvg * 10) / 10,
+          recommended_scenarios: recommended,
+        };
+      }
+    }
+  }
+
+  return Response.json({ sessions, weakness, session_count: sessionCount });
 }
