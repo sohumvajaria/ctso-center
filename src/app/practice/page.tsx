@@ -5,6 +5,12 @@ import Link from 'next/link';
 import { type Scenario, SCENARIOS, getRandomScenario } from '@/lib/scenarios';
 import { EXEMPLARS } from '@/lib/exemplars';
 
+declare global {
+  interface Window {
+    webkitSpeechRecognition: typeof SpeechRecognition;
+  }
+}
+
 interface PiScore {
   pi_number: number;
   score: number;
@@ -155,6 +161,13 @@ export default function PracticePage() {
   const [weakness, setWeakness] = useState<WeaknessData | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
 
+  // Voice input
+  const [isRecording, setIsRecording] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState<boolean | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const baseTextRef = useRef('');
+  const finalsSoFarRef = useRef('');
+
   async function fetchHistory() {
     const res = await fetch('/api/session');
     if (res.ok) {
@@ -166,6 +179,11 @@ export default function PracticePage() {
   }
 
   useEffect(() => { fetchHistory(); }, []);
+
+  useEffect(() => {
+    setSpeechSupported(!!(window.SpeechRecognition ?? window.webkitSpeechRecognition));
+    return () => { recognitionRef.current?.stop(); };
+  }, []);
 
   // Timers
   const [prepLeft, setPrepLeft] = useState(PREP_DURATION);
@@ -197,9 +215,59 @@ export default function PracticePage() {
     }, 1000);
   }
 
+  function startRecording() {
+    const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!SR) return;
+
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    baseTextRef.current = response.trimEnd();
+    finalsSoFarRef.current = '';
+
+    recognition.onresult = (event) => {
+      let newFinals = '';
+      let interim = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const text = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          newFinals += text;
+        } else {
+          interim += text;
+        }
+      }
+
+      if (newFinals) finalsSoFarRef.current += ' ' + newFinals;
+
+      const prefix = baseTextRef.current ? baseTextRef.current + ' ' : '';
+      setResponse((prefix + finalsSoFarRef.current + (interim ? ' ' + interim : '')).trim());
+    };
+
+    recognition.onerror = () => { setIsRecording(false); };
+    recognition.onend = () => { setIsRecording(false); };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsRecording(true);
+  }
+
+  function stopRecording() {
+    recognitionRef.current?.stop();
+    setIsRecording(false);
+  }
+
+  function toggleRecording() {
+    if (isRecording) stopRecording();
+    else startRecording();
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!response.trim()) return;
+    if (isRecording) stopRecording();
     setLoading(true);
     setError('');
 
@@ -404,16 +472,64 @@ export default function PracticePage() {
             </p>
           </div>
           <div className="p-5" style={{ background: 'rgba(255,255,255,0.015)' }}>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <textarea
-                value={response}
-                onChange={(e) => setResponse(e.target.value)}
-                rows={6}
-                className="w-full bg-transparent px-1 py-1 text-sm text-white/90 placeholder-white/18 focus:outline-none resize-none leading-7"
-                style={{ caretColor: 'rgba(165,180,252,0.9)' }}
-                placeholder="Type your response here…"
-                disabled={loading}
-              />
+            <form onSubmit={handleSubmit} className="space-y-3">
+              {/* Textarea with mic button overlay */}
+              <div className="relative">
+                <textarea
+                  value={response}
+                  onChange={(e) => setResponse(e.target.value)}
+                  rows={6}
+                  className="w-full bg-transparent px-1 py-1 text-sm text-white/90 placeholder-white/18 focus:outline-none resize-none leading-7"
+                  style={{
+                    caretColor: 'rgba(165,180,252,0.9)',
+                    paddingRight: speechSupported ? '2.5rem' : undefined,
+                  }}
+                  placeholder={speechSupported ? 'Type or tap the mic to speak…' : 'Type your response here…'}
+                  disabled={loading}
+                />
+
+                {speechSupported && (
+                  <button
+                    type="button"
+                    onClick={toggleRecording}
+                    disabled={loading}
+                    aria-label={isRecording ? 'Stop recording' : 'Start voice input'}
+                    className="absolute bottom-2 right-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all disabled:opacity-30"
+                    style={
+                      isRecording
+                        ? { background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171' }
+                        : { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.3)' }
+                    }
+                  >
+                    {isRecording ? (
+                      /* Stop square */
+                      <svg viewBox="0 0 14 14" width="11" height="11" fill="currentColor">
+                        <rect x="2" y="2" width="10" height="10" rx="2" />
+                      </svg>
+                    ) : (
+                      /* Microphone */
+                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                        <rect x="5.5" y="1.5" width="5" height="7" rx="2.5" stroke="currentColor" strokeWidth="1.4" />
+                        <path d="M3 8a5 5 0 0010 0" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                        <line x1="8" y1="13" x2="8" y2="15.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                        <line x1="5.5" y1="15.5" x2="10.5" y2="15.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                      </svg>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              {/* Recording indicator */}
+              {isRecording && (
+                <div className="flex items-center gap-2.5">
+                  <span className="relative flex w-2 h-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-60" />
+                    <span className="relative inline-flex rounded-full w-2 h-2 bg-red-500" />
+                  </span>
+                  <span className="text-[11px] font-medium text-red-400/70">Listening — speak clearly</span>
+                </div>
+              )}
+
               <div className="flex items-center justify-between pt-1" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
                 <div className="flex gap-2.5">
                   <button
@@ -435,11 +551,18 @@ export default function PracticePage() {
                     </button>
                   )}
                 </div>
-                {response.trim() && (
-                  <span className="text-[11px] text-white/20 tabular-nums">
-                    {response.trim().split(/\s+/).length} words
-                  </span>
-                )}
+                <div className="text-right">
+                  {response.trim() && !isRecording && (
+                    <span className="text-[11px] text-white/20 tabular-nums">
+                      {response.trim().split(/\s+/).length} words
+                    </span>
+                  )}
+                  {speechSupported === false && (
+                    <span className="text-[11px] text-white/20">
+                      Voice unavailable — use Chrome or Edge
+                    </span>
+                  )}
+                </div>
               </div>
             </form>
           </div>
